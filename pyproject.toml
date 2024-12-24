@@ -34,7 +34,7 @@ dependencies = [
     "tiktoken>=0.8.0",
     "together>=0.2.11",
     "transformers>=4.46.1",
-    "unstructured-inference>=0.8.1",
+   
     "unstructured-pytesseract>=0.3.13",
     "unstructured>=0.16.3",
 ]

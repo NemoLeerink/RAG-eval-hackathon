@@ -4,17 +4,17 @@ import os
 from operator import itemgetter
 from pathlib import Path
 from typing import List
-
 from dotenv import load_dotenv  # For loading environment variables from .env file
 from langchain.retrievers.multi_query import MultiQueryRetriever
 from langchain.schema import Document  # LangChain's Document schema
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma  # Chroma for vector storage
 from langchain_community.document_loaders import PyMuPDFLoader, DirectoryLoader
+from langchain_community.chat_models import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder  # For creating chat prompt templates
 from langchain_core.pydantic_v1 import BaseModel  # Base model for Pydantic
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda  # For creating runnable pipelines
-from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings  # Azure OpenAI interfaces for LangChain
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings, OpenAIEmbeddings  # Azure OpenAI interfaces for LangChain
 from langchain.chains import create_retrieval_chain, create_history_aware_retriever
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
@@ -23,11 +23,13 @@ from langchain_together import ChatTogether
 from langchain_core.output_parsers import StrOutputParser
 
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
-AZURE_OPENAI_API_VERSION=os.getenv("AZURE_OPENAI_API_VERSION")
-AZURE_EMBEDDING_MODEL_NAME = os.getenv("AZURE_EMBEDDING_MODEL_NAME")
-AZURE_CHAT_MODEL_NAME = os.getenv("AZURE_CHAT_MODEL_NAME")
+OPENAI_API_VERSION=os.getenv("OPENAI_API_VERSION")
+OPENAI_EMBEDDING_MODEL_NAME = os.getenv("OPENAI_EMBEDDING_MODEL_NAME")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OLLAMA_USERNAME=os.getenv("OLLAMA_USERNAME")
+OLLAMA_PASSWORD=os.getenv("OLLAMA_PASSWORD")
 
-def load_azure_embedding_model() -> AzureOpenAIEmbeddings:
+def load_openai_embedding_model() -> OpenAIEmbeddings:
     """create embedding model based on input
 
     Args:
@@ -35,26 +37,19 @@ def load_azure_embedding_model() -> AzureOpenAIEmbeddings:
         api_version (str): api_version
 
     Returns:
-        embedding_model (AzureOpenAIEmbeddings): The embedding model
+
+        embedding_model (OpenAIEmbeddings): The embedding model
     """
-    embed = AzureOpenAIEmbeddings(
-        openai_api_version=AZURE_OPENAI_API_VERSION,
-        azure_deployment=AZURE_EMBEDDING_MODEL_NAME
+    embed = OpenAIEmbeddings(
+        openai_api_version=OPENAI_API_VERSION,
+        deployment=OPENAI_EMBEDDING_MODEL_NAME,
+        api_key=OPENAI_API_KEY
     )
-    # The number of pieces of Documents that get send to the Azure OpenAI Embedding model to be embedded.
-    # Higher number will take longer to process, but requires less requests to the Azure service and
+    # The number of pieces of Documents that get send to the OpenAI Embedding model to be embedded.
+    # Higher number will take longer to process, but requires less requests to the service and
     # limits the 429 response code: too many requests
     embed.chunk_size = 1024
     return embed
-
-def load_azure_chat_model() -> AzureChatOpenAI:
-    chat_model = AzureChatOpenAI(
-        openai_api_version=AZURE_OPENAI_API_VERSION,
-        azure_deployment=AZURE_CHAT_MODEL_NAME,
-        temperature=0.0,
-        streaming=True,
-    )
-    return chat_model
 
 def load_together_chat_model(model: str) -> ChatTogether: 
     chat_model = ChatTogether(
@@ -63,6 +58,15 @@ def load_together_chat_model(model: str) -> ChatTogether:
         max_tokens=None,
         timeout=None,
         max_retries=2,
+    )
+    return chat_model
+
+def load_ollama_chat_model(model: str) -> ChatOllama: 
+    # Requires a patch in Langchain _create_stream (add verify=False to the request.post)
+    chat_model = ChatOllama(
+        model=model,
+        base_url="https://openllm.stream/tokens",
+        auth=(OLLAMA_USERNAME, OLLAMA_PASSWORD)
     )
     return chat_model
 
@@ -89,12 +93,12 @@ def load_persistent_retriever(embedding_model, data_root, documents, chunk_size,
         vectorstore = Chroma(collection_name=collection_name, embedding_function=embedding_model,
                             persist_directory=vectorstore_persist_directory)
     else:
-        vectorstore = Chroma.from_documents(
-            documents=split_docs,
+        vectorstore = Chroma(
             collection_name=collection_name,
             embedding=embedding_model,
             persist_directory=vectorstore_persist_directory
         )
+        vectorstore.add_documents(split_docs)
 
     retriever = vectorstore.as_retriever(fetch_k=3)
 
